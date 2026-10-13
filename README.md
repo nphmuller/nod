@@ -1,0 +1,118 @@
+# Nod — Secret vault
+
+A web app for key / secret value / description management, with an authenticated, read-only API for AI agents. No third-party runtime dependencies; requires **Node.js 24+**.
+
+## Run
+
+```sh
+npm run setup
+npm start
+```
+
+Open **http://localhost:3000** and sign in with the admin token printed by setup. Setup creates a private, Git-ignored `.env` with a random encryption key and separate admin and agent tokens. It refuses to overwrite an existing configuration. There are no demo secrets or default passwords.
+
+Use the web console to add, edit, rotate, search, and delete secrets. Editing never loads an existing value into the browser; leave the value blank to preserve it. Activity records changes and successful agent access without secret values.
+
+```sh
+npm test     # API, encryption, authentication, persistence, and security tests
+npm run dev # server watch mode
+```
+
+## Docker
+
+Build the image and generate credentials once (skip setup if `.env` already exists):
+
+```sh
+docker build -t nod-vault .
+npm run setup
+```
+
+If Node.js is not installed on the host, generate the configuration using the image instead:
+
+```sh
+docker run --rm --user "$(id -u):$(id -g)" \
+  --mount "type=bind,source=$(pwd),target=/setup" \
+  --workdir /setup nod-vault node /app/scripts/setup.js
+```
+
+Run with runtime credentials and a persistent named volume:
+
+```sh
+docker run -d --name nod-vault --restart unless-stopped \
+  -p 127.0.0.1:3000:3000 \
+  --env-file .env \
+  -e HOST=0.0.0.0 \
+  -e PORT=3000 \
+  -e DATA_DIR=/app/data \
+  -e APP_ORIGIN=http://localhost:3000 \
+  --mount type=volume,source=nod-vault-data,target=/app/data \
+  nod-vault
+```
+
+Open **http://localhost:3000**. The explicit environment overrides ensure the local `.env` defaults do not bind the container to loopback or change its database location. The image runs as the non-root `node` user and includes a health check. No credentials, database files, or local `.env` files are included in the build context or image.
+
+The named volume survives container replacement. Keep the same `VAULT_ENCRYPTION_KEY` when reusing it. A new volume starts empty; it does not import an existing host database. If using a bind mount instead, its directory must be writable by the image's `node` user (UID/GID 1000).
+
+For production, configure a TLS reverse proxy and replace the origin override with your HTTPS URL; set `SECURE_COOKIE=true`. Environment variables are visible to Docker administrators, so restrict Docker access and use your deployment platform's secret injection facilities where available.
+
+## Agent API
+
+Give a trusted agent the `AGENT_TOKEN` from `.env` through its tool runtime or secret manager. Do not put it in a prompt. Agents use `Authorization: Bearer <AGENT_TOKEN>`.
+
+| Endpoint | Authentication | Purpose |
+| --- | --- | --- |
+| `GET /api/v1` | Public | Discover available APIs |
+| `GET /openapi.json` | Public | OpenAPI 3.1 tool definitions |
+| `GET /llms.txt` | Public | Agent-readable instructions |
+| `GET /.well-known/ai-plugin.json` | Public | OpenAPI discovery manifest |
+| `GET /docs` | Public | Integration guide and examples |
+| `GET /api/v1/keys` | Agent bearer token | List keys, descriptions, and timestamps; **no values** |
+| `GET /api/v1/keys/{key}/value` | Agent bearer token | Retrieve one secret: `{ "key": "…", "value": "…" }` |
+
+Point OpenAPI-capable agents to `http://localhost:3000/openapi.json`, or register the two operations as tools in your framework. Discoverability does not automatically register the app with every AI platform.
+
+```sh
+# AGENT_TOKEN should be injected by your runtime.
+curl --fail http://localhost:3000/api/v1/keys \
+  -H "Authorization: Bearer $AGENT_TOKEN"
+```
+
+Retrieve values **inside the tool runtime** and inject them directly into downstream API calls. Do not send returned values to chat transcripts or logs. The public `/docs` guide includes this pattern. Treat descriptions as untrusted data, not instructions.
+
+### Administration API
+
+The web console uses a separate admin session:
+
+- `POST /api/auth/login` with `{ "token": "<ADMIN_TOKEN>" }` creates an eight-hour HttpOnly, SameSite=Strict cookie.
+- `GET /api/auth/session` checks the session; `POST /api/auth/logout` invalidates it.
+- `GET /api/admin/secrets` returns metadata only.
+- `POST /api/admin/secrets` creates `{ "key", "description", "value" }`.
+- `PUT /api/admin/secrets/{key}` updates `{ "description", "value"? }`. Omit `value` to preserve it; keys are immutable.
+- `DELETE /api/admin/secrets/{key}` deletes a secret.
+- `GET /api/admin/activity` returns the latest 50 events.
+
+All admin endpoints require the session. Mutations and login also require an `Origin` header equal to `APP_ORIGIN`. Agent bearer tokens cannot access administration endpoints; admin tokens and cookies cannot access agent endpoints.
+
+## Security and deployment
+
+- AES-256-GCM encryption with a fresh random nonce per write; key names are authenticated as additional data. SQLite stores ciphertext, never plaintext values.
+- Encryption key and tokens live outside the database. Local configuration and database permissions are restricted; `.env` and `data/` are Git-ignored.
+- Secret responses and app responses are `Cache-Control: no-store`. No CORS, external analytics, CDN scripts, or third-party resources. CSP and clickjacking protections are enabled.
+- API rate limiting: 120 agent requests/minute and 10 sign-in attempts/minute per connection IP. Behind a proxy, connection IP may be the proxy; forwarded headers are intentionally not trusted. Add proxy-level limits as needed.
+- **An agent token grants access to every key in the vault.** Per-agent tokens, per-key scopes, expiry, and revocation management are not implemented. Use separate instances for distinct trust boundaries.
+- This is a single-process, single-workspace app, not a multi-tenant production secrets service. Sessions and rate limits are in memory; restarts sign users out. Audit retention is not automatically pruned.
+- Encryption at rest cannot protect against a compromised running server or theft of both the database and encryption key. Metadata and audit records are not encrypted.
+- For production, terminate TLS at a trusted reverse proxy, set `APP_ORIGIN=https://your-vault.example`, `SECURE_COOKIE=true`, and restrict direct access to the backend. The default listener binds to loopback. Set `HOST=0.0.0.0` only in a controlled container/network.
+- Set `APP_ORIGIN` to the exact browser origin (scheme, hostname, and port). `localhost` and `127.0.0.1` are different origins. If changing `PORT`, also change `APP_ORIGIN`.
+- Back up `data/vault.sqlite` while the server is stopped, and store the encryption key separately and securely. Restore both to recover values. **Do not change the encryption key without re-encrypting the database.** Changing `AGENT_TOKEN` and restarting revokes the old agent token; changing `ADMIN_TOKEN` and restarting invalidates sessions.
+
+## Layout
+
+```text
+server/index.js   HTTP server, auth, validation, routes, security headers
+server/store.js   SQLite persistence, authenticated encryption, audit
+server/openapi.js Machine-readable API schema
+public/          Responsive web console and integration guide
+scripts/setup.js Safe first-time credential provisioning
+test/            Node built-in test suite
+```
