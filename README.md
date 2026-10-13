@@ -55,6 +55,21 @@ The named volume survives container replacement. Keep the same `VAULT_ENCRYPTION
 
 For production, configure a TLS reverse proxy and replace the origin override with your HTTPS URL; set `SECURE_COOKIE=true`. Environment variables are visible to Docker administrators, so restrict Docker access and use your deployment platform's secret injection facilities where available.
 
+### Automated container publishing
+
+The GitHub Actions workflow in `.github/workflows/container.yml` runs on every push to `main` (and can also be started manually). It runs the Node.js tests first, then builds the Linux AMD64 container and publishes it to GitHub Container Registry using the built-in `GITHUB_TOKEN`.
+
+Published tags:
+
+- `ghcr.io/nphmuller/nod:latest`
+- `ghcr.io/nphmuller/nod:sha-<full-commit-sha>`
+
+```sh
+docker pull ghcr.io/nphmuller/nod:latest
+```
+
+Use that image in place of `nod-vault` in the run instructions above. New GitHub packages may be private by default; change the package visibility to public if you want unauthenticated pulls, or authenticate Docker to GHCR with credentials authorized to read the package. Publishing requires GitHub Actions to be enabled and the repository's token policy to permit package writes. Action versions are pinned to commit SHAs.
+
 ## Agent API
 
 Give a trusted agent the `AGENT_TOKEN` from `.env` through its tool runtime or secret manager. Do not put it in a prompt. Agents use `Authorization: Bearer <AGENT_TOKEN>`.
