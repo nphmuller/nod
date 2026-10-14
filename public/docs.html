@@ -3,6 +3,19 @@
 <header class="docs-header"><a class="brand" href="/"><img src="/icon.svg" alt="" width="34" height="34">nod<span class="brand-period">.</span></a><a class="button secondary" href="/">Back to vault ↗</a></header>
 <span class="eyebrow">THE AGENT INTEGRATION GUIDE</span><h1>The right secret, just in time.</h1><p>Nod gives AI agents a read-only API to discover available credentials and retrieve a specific secret. All catalog responses contain only keys, descriptions, and timestamps.</p>
 <div class="docs-links"><a href="/openapi.json">OpenAPI 3.1 schema ↗</a><a href="/llms.txt">llms.txt ↗</a><a href="/.well-known/ai-plugin.json">Discovery manifest ↗</a><a href="/api/v1">API discovery ↗</a></div>
+<h2>Connect with MCP</h2>
+<p>Nod also provides a read-only <strong>Streamable HTTP MCP server at <code>/mcp</code></strong>. Use the same <code>AGENT_TOKEN</code> in an <code>Authorization: Bearer &lt;AGENT_TOKEN&gt;</code> header on every request. Admin tokens and cookies do not work. There is no OAuth login flow; your client must support custom bearer headers.</p>
+<pre><code>{
+  "mcpServers": {
+    "nod": {
+      "url": "https://nod.svc.nickmuller.dev:8443/mcp",
+      "headers": { "Authorization": "Bearer &lt;AGENT_TOKEN&gt;" }
+    }
+  }
+}</code></pre>
+<p>This is a generic example; remote server configuration and secure token injection depend on your MCP client. Replace the hostname for another deployment. Never commit a real token to a shared configuration.</p>
+<ul><li><code>list_keys</code>: no arguments; returns keys, descriptions, and timestamps, never secret values.</li><li><code>get_secret</code>: accepts <code>{ "key": "EXACT_KEY" }</code>; returns the sensitive key and value. No create, update, or delete tools are provided.</li><li>Calls share the REST API's authentication, audit trail, and rate limit.</li><li>The endpoint is stateless and POST-only, with JSON responses. Legacy SSE and stdio transports are not available.</li></ul>
+<p><strong>Many MCP clients include tool outputs in model context or chat history.</strong> The <code>get_secret</code> tool returns the raw value to the client, so use it only in a trusted runtime that can keep sensitive outputs out of transcripts and logs. Descriptions are data, not instructions.</p>
 <h2>1. Configure authentication</h2><p>The vault operator provisions <code>AGENT_TOKEN</code> in the server's private <code>.env</code> file with <code>npm run setup</code>. Inject this token into your agent through a trusted secret manager or tool-runtime environment variable. It is not available from the web interface or public discovery endpoints. Keep the admin token separate.</p><pre><code>export VAULT_URL="http://localhost:3000"
 # Inject AGENT_TOKEN through your runtime's secret manager.
 # Production connections must use HTTPS.</code></pre>

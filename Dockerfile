@@ -2,8 +2,8 @@ FROM node:24-bookworm-slim
 
 WORKDIR /app
 
-# There are no third-party dependencies to install.
-COPY package.json ./
+COPY package.json package-lock.json ./
+RUN npm ci --omit=dev --ignore-scripts && npm cache clean --force
 COPY server/ ./server/
 COPY public/ ./public/
 COPY scripts/ ./scripts/

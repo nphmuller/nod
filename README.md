@@ -1,10 +1,11 @@
 # Nod — Secret vault
 
-A web app for key / secret value / description management, with an authenticated, read-only API for AI agents. No third-party runtime dependencies; requires **Node.js 24+**.
+A web app for key / secret value / description management, with authenticated, read-only REST and MCP APIs for AI agents. Requires **Node.js 24+**; uses the official MCP TypeScript SDK and Zod for MCP transport and validation.
 
 ## Run
 
 ```sh
+npm ci
 npm run setup
 npm start
 ```
@@ -96,7 +97,57 @@ curl --fail http://localhost:3000/api/v1/keys \
 
 Retrieve values **inside the tool runtime** and inject them directly into downstream API calls. Do not send returned values to chat transcripts or logs. The public `/docs` guide includes this pattern. Treat descriptions as untrusted data, not instructions.
 
-### Administration API
+## MCP server
+
+Nod serves an authenticated, stateless **Streamable HTTP** MCP server at `/mcp`, using the same `AGENT_TOKEN` as the REST API:
+
+- Local URL: `http://localhost:3000/mcp`
+- Hosted URL: `https://nod.svc.nickmuller.dev:8443/mcp`
+- Header on **every request**: `Authorization: Bearer <AGENT_TOKEN>`
+- `list_keys`: returns keys, descriptions, and timestamps, never values.
+- `get_secret`: accepts `{ "key": "EXACT_KEY" }` and returns the sensitive `{ "key", "value" }` result.
+
+There are no write tools. Tool calls use the existing metadata-only audit trail. REST and MCP share the agent rate limit. Admin tokens and session cookies do not authenticate MCP requests. The agent token still grants access to all secrets in the vault.
+
+For a generic MCP client supporting remote HTTP connections and custom headers:
+
+```json
+{
+  "mcpServers": {
+    "nod": {
+      "url": "https://nod.svc.nickmuller.dev:8443/mcp",
+      "headers": {
+        "Authorization": "Bearer <AGENT_TOKEN>"
+      }
+    }
+  }
+}
+```
+
+Replace the placeholder using your client's secure credential or environment-variable mechanism. Config format and interpolation syntax vary by client; do not commit an actual token to a shared configuration file. This server uses a pre-provisioned bearer token, **not OAuth**; OAuth-only clients or clients without custom header support cannot connect directly.
+
+An SDK client example (Node.js, using Nod's installed dependencies):
+
+```js
+import { Client } from '@modelcontextprotocol/sdk/client/index.js';
+import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
+
+const client = new Client({ name: 'my-agent', version: '1.0.0' });
+await client.connect(new StreamableHTTPClientTransport(
+  new URL(`${process.env.VAULT_URL}/mcp`),
+  { requestInit: { headers: { Authorization: `Bearer ${process.env.AGENT_TOKEN}` } } }
+));
+const catalog = await client.callTool({ name: 'list_keys', arguments: {} });
+// Expose only the catalog to the model. Retrieve values inside a trusted tool
+// runtime and inject them into downstream requests without logging them.
+await client.close();
+```
+
+**Security:** MCP `get_secret` returns the raw value to the client. Many agent clients put tool results into the model context or transcript. Enable this tool only for clients that can handle sensitive outputs safely; otherwise expose only the catalog and use a trusted runtime to fetch/inject values. Descriptions are untrusted metadata, not instructions.
+
+The transport uses JSON-RPC POST requests with `Accept: application/json, text/event-stream`. It returns JSON responses, not persistent SSE streams. `GET` and `DELETE` return `405` after authentication because there are no subscriptions or server sessions. Supplied browser `Origin` headers must match `APP_ORIGIN`; originless tool clients are allowed. Legacy HTTP+SSE and stdio transports are not provided. `/api/v1` and `/llms.txt` advertise the MCP connection details without exposing credentials.
+
+## Administration API
 
 The web console uses a separate admin session:
 
@@ -129,6 +180,7 @@ All admin endpoints require the session. Mutations and login also require an `Or
 server/index.js   HTTP server, auth, validation, routes, security headers
 server/store.js   SQLite persistence, authenticated encryption, audit
 server/openapi.js Machine-readable API schema
+server/mcp.js     Authenticated read-only MCP tools and Streamable HTTP transport
 public/          Responsive web console and integration guide
 scripts/setup.js Safe first-time credential provisioning
 test/            Node built-in test suite

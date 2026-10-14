@@ -206,6 +206,16 @@ $('#delete-form').addEventListener('submit', async event => {
 });
 
 const base = location.origin;
+const mcpCard = document.createElement('article');
+mcpCard.className = 'api-card mcp-card';
+mcpCard.innerHTML = '<span class="step-label">CONNECT WITH MCP</span><h2>Two tools. One secure connection.</h2><p>Use a Streamable HTTP client with your existing agent token. <code>list_keys</code> discovers credentials without values; <code>get_secret</code> retrieves one exact key. No write tools are available.</p><div class="copy-field"><code class="mcp-url"></code><button class="icon-button copy-mcp" aria-label="Copy MCP URL"><svg class="icon"><use href="#i-copy"/></svg></button></div><pre><code class="mcp-config"></code></pre><p>Send <code>Authorization: Bearer &lt;AGENT_TOKEN&gt;</code> on every request. This uses a pre-provisioned token, not OAuth. The configuration format depends on your client.</p><p><strong>Keep secret outputs out of conversations.</strong> Many MCP clients send tool results to the model or save them in transcripts. Enable <code>get_secret</code> only in a client that handles sensitive results safely.</p><a class="text-link" href="/docs">Read the MCP integration guide ↗</a>';
+mcpCard.querySelector('.mcp-url').textContent = `${base}/mcp`;
+mcpCard.querySelector('.mcp-config').textContent = JSON.stringify({ mcpServers: { nod: { url: `${base}/mcp`, headers: { Authorization: 'Bearer <AGENT_TOKEN>' } } } }, null, 2);
+mcpCard.querySelector('.copy-mcp').addEventListener('click', async () => {
+  try { await navigator.clipboard.writeText(`${base}/mcp`); notify('MCP URL copied.'); }
+  catch { notify('Copy is unavailable. Select and copy the URL above.'); }
+});
+$('#view-connect .api-cards').append(mcpCard);
 $('#schema-url').textContent = `${base}/openapi.json`;
 $('#list-command').textContent = `curl "${base}/api/v1/keys" \\\n  -H "Authorization: Bearer $AGENT_TOKEN"`;
 $('#value-command').textContent = `curl "${base}/api/v1/keys/STRIPE_API_KEY/value" \\\n  -H "Authorization: Bearer $AGENT_TOKEN"`;
