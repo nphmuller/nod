@@ -13,6 +13,8 @@ Open **http://localhost:3000** and sign in with the admin token printed by setup
 
 Use the web console to add, edit, rotate, search, and delete secrets. Editing never loads an existing value into the browser; leave the value blank to preserve it. Activity records changes and successful agent access without secret values.
 
+The console and API guide automatically follow your device's light or dark theme, including changes while the page is open.
+
 ```sh
 npm test     # API, encryption, authentication, persistence, and security tests
 npm run dev # server watch mode
