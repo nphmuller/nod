@@ -26,6 +26,12 @@ export function createStore(directory, encryptionKey) {
       key TEXT,
       timestamp TEXT NOT NULL
     );
+    CREATE TABLE IF NOT EXISTS mcp_servers (
+      id TEXT PRIMARY KEY,
+      config TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
   `);
 
   function encrypt(key, value) {
@@ -93,6 +99,32 @@ export function createStore(directory, encryptionKey) {
       });
     },
     audit,
+    upstreams() {
+      return db.prepare('SELECT * FROM mcp_servers ORDER BY id').all().map(row => ({ ...JSON.parse(row.config), createdAt: row.created_at, updatedAt: row.updated_at }));
+    },
+    upstream(id) {
+      const row = db.prepare('SELECT * FROM mcp_servers WHERE id = ?').get(id);
+      return row && { ...JSON.parse(row.config), createdAt: row.created_at, updatedAt: row.updated_at };
+    },
+    saveUpstream(config) {
+      return transaction(() => {
+        const existing = db.prepare('SELECT created_at FROM mcp_servers WHERE id = ?').get(config.id);
+        const now = new Date().toISOString();
+        // Only secret-key references are stored here, never credential values.
+        db.prepare(`INSERT INTO mcp_servers VALUES (?, ?, ?, ?)
+          ON CONFLICT(id) DO UPDATE SET config = excluded.config, updated_at = excluded.updated_at`)
+          .run(config.id, JSON.stringify(config), existing?.created_at ?? now, now);
+        audit(existing ? 'upstream.updated' : 'upstream.created', 'admin', config.id);
+        return { ...config, createdAt: existing?.created_at ?? now, updatedAt: now };
+      });
+    },
+    deleteUpstream(id) {
+      return transaction(() => {
+        const deleted = db.prepare('DELETE FROM mcp_servers WHERE id = ?').run(id).changes > 0;
+        if (deleted) audit('upstream.deleted', 'admin', id);
+        return deleted;
+      });
+    },
     activity() {
       return db.prepare('SELECT action, actor, key, timestamp FROM audit ORDER BY id DESC LIMIT 50').all();
     },

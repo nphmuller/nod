@@ -34,6 +34,7 @@ function lock() {
   keys = [];
   $('#secret-rows').replaceChildren();
   $('#activity-list').replaceChildren();
+  if (typeof clearGatewayUI === 'function') clearGatewayUI();
   $('#admin-token').value = '';
 }
 
@@ -93,8 +94,9 @@ async function switchView(view) {
     if (button.dataset.view === view) button.setAttribute('aria-current', 'page');
     else button.removeAttribute('aria-current');
   });
-  $('#breadcrumb-current').textContent = { secrets: 'Secrets', activity: 'Activity', connect: 'Agent API' }[view];
+  $('#breadcrumb-current').textContent = { secrets: 'Secrets', activity: 'Activity', connect: 'Agent API', upstreams: 'MCP servers' }[view];
   if (view === 'activity') await loadActivity();
+  if (view === 'upstreams') await loadUpstreams();
 }
 
 async function loadActivity() {
@@ -102,6 +104,8 @@ async function loadActivity() {
   const labels = {
     'secret.created': 'Secret created', 'secret.updated': 'Secret updated', 'secret.deleted': 'Secret deleted',
     'secret.retrieved': 'Secret retrieved', 'catalog.listed': 'Key catalog requested', 'session.started': 'Signed in to the vault',
+    'upstream.created': 'MCP server added', 'upstream.updated': 'MCP server updated', 'upstream.deleted': 'MCP server removed',
+    'upstream.reconnected': 'MCP server reconnected', 'gateway.tool_called': 'Upstream tool called',
   };
   const rows = data.activity.map(item => {
     const row = document.createElement('div');
@@ -208,7 +212,7 @@ $('#delete-form').addEventListener('submit', async event => {
 const base = location.origin;
 const mcpCard = document.createElement('article');
 mcpCard.className = 'api-card mcp-card';
-mcpCard.innerHTML = '<span class="step-label">CONNECT WITH MCP</span><h2>Two tools. One secure connection.</h2><p>Use a Streamable HTTP client with your existing agent token. <code>list_keys</code> discovers credentials without values; <code>get_secret</code> retrieves one exact key. No write tools are available.</p><div class="copy-field"><code class="mcp-url"></code><button class="icon-button copy-mcp" aria-label="Copy MCP URL"><svg class="icon"><use href="#i-copy"/></svg></button></div><pre><code class="mcp-config"></code></pre><p>Send <code>Authorization: Bearer &lt;AGENT_TOKEN&gt;</code> on every request. This uses a pre-provisioned token, not OAuth. The configuration format depends on your client.</p><p><strong>Keep secret outputs out of conversations.</strong> Many MCP clients send tool results to the model or save them in transcripts. Enable <code>get_secret</code> only in a client that handles sensitive results safely.</p><a class="text-link" href="/docs">Read the MCP integration guide ↗</a>';
+mcpCard.innerHTML = '<span class="step-label">CONNECT WITH MCP</span><h2>Your vault and tools. One connection.</h2><p>Use a Streamable HTTP client with your existing agent token. <code>list_keys</code> discovers credentials without values; <code>get_secret</code> retrieves one exact key. Configure remote servers in MCP servers to add namespaced upstream tools. Credential tools are read-only; upstream tools may perform writes.</p><div class="copy-field"><code class="mcp-url"></code><button class="icon-button copy-mcp" aria-label="Copy MCP URL"><svg class="icon"><use href="#i-copy"/></svg></button></div><pre><code class="mcp-config"></code></pre><p>Send <code>Authorization: Bearer &lt;AGENT_TOKEN&gt;</code> on every request. This uses a pre-provisioned token, not OAuth. The configuration format depends on your client.</p><p><strong>Keep secret outputs out of conversations.</strong> Many MCP clients send tool results to the model or save them in transcripts. Enable <code>get_secret</code> only in a client that handles sensitive results safely.</p><a class="text-link" href="/docs">Read the MCP integration guide ↗</a>';
 mcpCard.querySelector('.mcp-url').textContent = `${base}/mcp`;
 mcpCard.querySelector('.mcp-config').textContent = JSON.stringify({ mcpServers: { nod: { url: `${base}/mcp`, headers: { Authorization: 'Bearer <AGENT_TOKEN>' } } } }, null, 2);
 mcpCard.querySelector('.copy-mcp').addEventListener('click', async () => {

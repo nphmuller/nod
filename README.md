@@ -1,6 +1,6 @@
 # Nod — Secret vault
 
-A web app for key / secret value / description management, with authenticated, read-only REST and MCP APIs for AI agents. Requires **Node.js 24+**; uses the official MCP TypeScript SDK and Zod for MCP transport and validation.
+A web app for key / secret value / description management, with authenticated credential APIs and a remote MCP gateway for AI agents. Requires **Node.js 24+**; uses the official MCP TypeScript SDK for MCP transport and validation.
 
 ## Run
 
@@ -107,7 +107,7 @@ Nod serves an authenticated, stateless **Streamable HTTP** MCP server at `/mcp`,
 - `list_keys`: returns keys, descriptions, and timestamps, never values.
 - `get_secret`: accepts `{ "key": "EXACT_KEY" }` and returns the sensitive `{ "key", "value" }` result.
 
-There are no write tools. Tool calls use the existing metadata-only audit trail. REST and MCP share the agent rate limit. Admin tokens and session cookies do not authenticate MCP requests. The agent token still grants access to all secrets in the vault.
+Nod's native credential tools remain read-only. Configured upstream tools are exposed alongside them and **may perform writes**. Tool calls use the existing metadata-only audit trail. REST and MCP share the agent rate limit. Admin tokens and session cookies do not authenticate MCP requests. The agent token grants access to all secrets and all enabled upstream tools in the vault.
 
 For a generic MCP client supporting remote HTTP connections and custom headers:
 
@@ -147,6 +147,60 @@ await client.close();
 
 The transport uses JSON-RPC POST requests with `Accept: application/json, text/event-stream`. It returns JSON responses, not persistent SSE streams. `GET` and `DELETE` return `405` after authentication because there are no subscriptions or server sessions. Supplied browser `Origin` headers must match `APP_ORIGIN`; originless tool clients are allowed. Legacy HTTP+SSE and stdio transports are not provided. `/api/v1` and `/llms.txt` advertise the MCP connection details without exposing credentials.
 
+## MCP gateway
+
+Configure trusted upstreams under **MCP servers** in the web console. An agent connects only to Nod's existing `/mcp` endpoint; no additional connection token or container environment variable is needed for each upstream.
+
+1. Add the upstream credential as a secret in the vault.
+2. Add a server with a stable ID such as `home_assistant`, its Streamable HTTP endpoint URL, and authentication mode.
+3. For bearer auth, select the vault key. Nod sends `Authorization: Bearer <value>`. For custom auth, add header names, referenced vault keys, and optional prefixes. An empty prefix sends the raw credential value. Inline credential values are deliberately unsupported.
+4. Check connection status, then refresh your agent's tool catalog or reconnect it to Nod.
+
+Tools use names such as `home_assistant__HassTurnOn`, avoiding collisions with `list_keys`, `get_secret`, and tools from other servers. Original input/output JSON Schemas and annotations are preserved, including non-read-only tools. Nonstandard or oversized names receive a stable hash suffix. Both original credential REST endpoints remain unchanged.
+
+Configurations persist in SQLite as endpoint/settings and **vault-key references**, not raw credentials. Credential values remain encrypted in the secret store and are resolved only inside Nod's server process. Editing a server, disabling/removing it, or rotating/deleting a referenced key invalidates the shared upstream connection. The next request reconnects with the current value, without restarting Nod or Docker. A connection failure omits that upstream's tools but does not hide native Nod tools or healthy upstreams. The UI keeps failed configurations so they can be corrected.
+
+Upstream tool catalogs are cached per connection. Use **Reconnect** in Nod to rediscover an upstream catalog; upstream tool-list-change notifications also invalidate the connection. Since downstream MCP is stateless, Nod does not broadcast list-change notifications to agents: refresh `tools/list` or reconnect the agent after changes.
+
+### Scope and security
+
+- Supports **remote Streamable HTTP** only, with no auth, bearer auth, or custom vault-referenced credential headers. OAuth flows, local stdio, legacy SSE endpoints, prompts/resources, sampling/elicitation, and chained Nod gateways are not supported in this version.
+- Only authenticated admins can configure endpoints. Private LAN endpoints are allowed for NAS services; configure only trusted destinations. HTTPS is the default requirement. Unencrypted HTTP requires explicit opt-in and sends credentials in plaintext on the network.
+- Endpoint URLs cannot contain userinfo, query parameters, or fragments. Credential headers cannot override transport/session, host, cookie, origin, or proxy headers. HTTP redirects are not followed, so credentials cannot be forwarded to a redirected destination. Downstream authentication/cookies are not forwarded.
+- Catalog discovery and tool calls have configurable 1–60 second timeouts (15 seconds by default). Upstream responses are bounded to 4 MiB, catalogs to 1,000 tools per upstream, and configurations to 32 servers. Failed connections have a five-second retry cooldown; manual reconnect bypasses it.
+- Raw upstream errors are never sent to clients or logs. Results/catalogs containing literal configured credential values are withheld. **This is not a complete data-loss-prevention system:** a malicious upstream can encode/exfiltrate credentials, so it must be trusted. Upstream descriptions, schemas, and results are untrusted content, not agent instructions.
+- Tool calls are audited by namespaced tool name without arguments, results, or credential values. Calls are **not automatically retried**, since writes may already have happened. Rotating credentials or disabling a server aborts local in-flight requests but cannot undo upstream actions.
+- An agent bearer token can invoke **every enabled tool** and use `get_secret` to retrieve any vault key. Per-agent/key/tool permissions are not implemented. Keep distinct trust boundaries in separate vault instances and configure client-side approvals for mutating tools.
+
+### Gateway administration API
+
+These routes require the same admin session and mutation `Origin` checks as secret administration:
+
+| Method and path | Purpose |
+| --- | --- |
+| `GET /api/admin/mcp-servers` | Server settings, connection status, and tool counts; no credential values |
+| `POST /api/admin/mcp-servers` | Add a server and attempt connection |
+| `PUT /api/admin/mcp-servers/{id}` | Replace settings and reconnect; IDs cannot change |
+| `POST /api/admin/mcp-servers/{id}/reconnect` | Force reconnection and catalog rediscovery |
+| `DELETE /api/admin/mcp-servers/{id}` | Remove a server, retaining its vault keys |
+
+Example configuration (all fields shown):
+
+```json
+{
+  "id": "home_assistant",
+  "url": "https://your-home-assistant.example/api/mcp",
+  "enabled": true,
+  "allowInsecureHttp": false,
+  "timeoutMs": 15000,
+  "headers": [
+    { "name": "Authorization", "secretKey": "HOMEASSISTANT_TOKEN", "prefix": "Bearer " }
+  ]
+}
+```
+
+Saving valid settings can succeed with `status: "failed"` if the upstream is unavailable or a key is missing. The configuration is retained; correct the key/URL and reconnect. There is no agent-facing server-management API.
+
 ## Administration API
 
 The web console uses a separate admin session:
@@ -180,7 +234,8 @@ All admin endpoints require the session. Mutations and login also require an `Or
 server/index.js   HTTP server, auth, validation, routes, security headers
 server/store.js   SQLite persistence, authenticated encryption, audit
 server/openapi.js Machine-readable API schema
-server/mcp.js     Authenticated read-only MCP tools and Streamable HTTP transport
+server/mcp.js     Native vault tools plus namespaced gateway tools over MCP
+server/gateway.js Upstream connections, credential resolution, forwarding, and limits
 public/          Responsive web console and integration guide
 scripts/setup.js Safe first-time credential provisioning
 test/            Node built-in test suite

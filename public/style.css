@@ -13,6 +13,36 @@ label{font-size:11px;font-weight:550;color:#566849}input,textarea{width:100%;bor
 @media(prefers-reduced-motion:reduce){*{scroll-behavior:auto!important;transition:none!important}}
 
 .mcp-card { grid-column: 1 / -1; }
+.gateway-list { display: grid; gap: 18px; }
+.gateway-card-heading { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+.gateway-card-heading h2 { margin: 0; overflow-wrap: anywhere; }
+.gateway-status { font-size: 10px; border-radius: 5px; padding: 6px 9px; background: var(--soft); color: var(--text); }
+.gateway-status-connected { color: #456a30; background: #e7f0dc; }
+.gateway-status-failed { color: #a04a3e; background: #fae9e3; }
+.gateway-url, .gateway-credentials, .gateway-summary { overflow-wrap: anywhere; }
+.gateway-url { font-family: var(--mono); }
+.gateway-actions { display: flex; flex-wrap: wrap; gap: 9px; margin-top: 20px; }
+.gateway-toolbar { padding: 10px 0 20px; min-height: auto; }
+.gateway-warning { margin-top: 23px; }
+.gateway-select { width: 100%; min-width: 0; border: 1px solid #dfe5d6; border-radius: 6px; background: #fcfdf9; color: var(--text); padding: 12px 10px; font-size: 12px; }
+.gateway-select:focus { outline: 2px solid #90ad72; outline-offset: 2px; }
+.gateway-options { display: grid; gap: 8px; margin-top: 18px; }
+.gateway-check { display: flex; align-items: center; gap: 8px; margin: 0; line-height: 1.8; }
+.gateway-check input[type=checkbox] { width: 16px; height: 16px; padding: 0; flex-shrink: 0; accent-color: var(--green); }
+.credential-header { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; border: 1px solid var(--line); border-radius: 7px; padding: 12px; margin: 12px 0; }
+.credential-header label { margin: 0; min-width: 0; }
+.credential-header input, .credential-header select { margin-top: 7px; }
+.credential-header .remove-header { align-self: end; justify-self: end; margin-bottom: 7px; }
+@media (max-width: 600px) {
+  .sidebar nav .nav-item { padding-left: 4px; padding-right: 4px; gap: 5px; font-size: 10px; }
+  .credential-header { grid-template-columns: 1fr; }
+  .gateway-card-heading { align-items: flex-start; }
+}
+@media (prefers-color-scheme: dark) {
+  .gateway-select { background: #141e16; border-color: #405338; }
+  .gateway-status-connected { background: #30432b; color: #d9edc0; }
+  .gateway-status-failed { background: #4a2923; color: #ffb4a4; }
+}
 
 /* Follow the device theme, including changes while a page is open.
    Keep this after the responsive rules so mobile surfaces use the same palette. */
