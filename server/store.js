@@ -79,9 +79,9 @@ export function createStore(directory, encryptionKey) {
       return includeDisabled ? rows : rows.map(({ enabled, ...item }) => item);
     },
     get(key) { return metadata(find.get(key)); },
-    value(key) {
+    value(key, { includeDisabled = false } = {}) {
       const row = find.get(key);
-      return row?.enabled ? decrypt(key, row.encrypted_value) : undefined;
+      return row && (row.enabled || includeDisabled) ? decrypt(key, row.encrypted_value) : undefined;
     },
     save(key, description, value, actor = 'admin', enabled) {
       return transaction(() => {

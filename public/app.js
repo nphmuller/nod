@@ -4,11 +4,22 @@ let editKey = null;
 let deleteKey = null;
 let currentView = 'secrets';
 let toastTimer;
+const secretHiders = new Set();
+let revealVersion = 0;
+
+function hideSecrets() {
+  revealVersion++;
+  for (const hide of secretHiders) hide();
+}
+
+document.addEventListener('visibilitychange', () => { if (document.hidden) hideSecrets(); });
+window.addEventListener('pagehide', hideSecrets);
 
 const secretAvailability = document.createElement('div');
 secretAvailability.className = 'gateway-options';
 secretAvailability.innerHTML = '<label class="gateway-check"><input id="secret-enabled" type="checkbox" checked> Enable this secret</label><p class="field-note">Disabled secrets stay encrypted, but are hidden from agents and cannot be used by MCP servers.</p>';
 $('#secret-error').before(secretAvailability);
+$('#view-secrets .catalog-footer span').lastChild.textContent = ' Values are masked by default · Show to reveal a secret';
 
 async function api(path, options = {}) {
   const response = await fetch(path, {
@@ -32,6 +43,7 @@ function notify(message) {
 }
 
 function lock() {
+  hideSecrets();
   $('#app').hidden = true;
   $('#login-screen').hidden = false;
   for (const dialog of document.querySelectorAll('dialog[open]')) dialog.close();
@@ -62,6 +74,8 @@ async function loadKeys() {
 }
 
 function renderKeys() {
+  hideSecrets();
+  secretHiders.clear();
   const query = $('#search').value.trim().toLowerCase();
   const filtered = keys.filter(item => `${item.key} ${item.description}`.toLowerCase().includes(query));
   $('#nav-count').textContent = keys.length;
@@ -76,6 +90,35 @@ function renderKeys() {
     row.querySelector('.key-name').textContent = item.key;
     row.querySelector('.key-name').addEventListener('click', () => openSecret(item));
     row.querySelector('.key-description').textContent = item.description;
+    const value = row.querySelector('.masked-value');
+    const reveal = document.createElement('button');
+    reveal.type = 'button';
+    reveal.className = 'secret-reveal';
+    const hide = () => {
+      value.textContent = '••••••••••••';
+      value.classList.remove('revealed-value');
+      reveal.textContent = 'Show';
+      reveal.setAttribute('aria-label', `Show value for ${item.key}`);
+      reveal.setAttribute('aria-pressed', 'false');
+    };
+    hide();
+    secretHiders.add(hide);
+    reveal.addEventListener('click', async () => {
+      if (reveal.getAttribute('aria-pressed') === 'true') { hide(); return; }
+      const version = revealVersion;
+      reveal.disabled = true;
+      try {
+        const data = await api(`/api/admin/secrets/${encodeURIComponent(item.key)}/value`);
+        if (version !== revealVersion || !row.isConnected || $('#app').hidden || currentView !== 'secrets' || document.hidden) return;
+        value.textContent = data.value;
+        value.classList.add('revealed-value');
+        reveal.textContent = 'Hide';
+        reveal.setAttribute('aria-label', `Hide value for ${item.key}`);
+        reveal.setAttribute('aria-pressed', 'true');
+      } catch (error) { notify(error.message); }
+      finally { reveal.disabled = false; }
+    });
+    value.after(reveal);
     if (!item.enabled) {
       const status = document.createElement('span');
       status.className = 'gateway-status';
@@ -112,6 +155,7 @@ function renderKeys() {
 }
 
 async function switchView(view) {
+  hideSecrets();
   currentView = view;
   document.querySelectorAll('.view').forEach(section => { section.hidden = section.id !== `view-${view}`; });
   document.querySelectorAll('.nav-item').forEach(button => {

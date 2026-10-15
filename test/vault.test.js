@@ -94,6 +94,33 @@ test('admin creates an encrypted secret, catalog excludes its value, agent expli
   assert.equal(value.response.headers.get('access-control-allow-origin'), null);
 });
 
+test('only signed-in admins can explicitly reveal values, including disabled secrets', async () => {
+  const path = '/api/admin/secrets/STRIPE_API_KEY/value';
+  for (const options of [{}, { auth: agentToken }, { auth: adminToken }]) {
+    const denied = await request(path, options);
+    assert.equal(denied.response.status, 401);
+    assert.ok(!denied.text.includes(secret));
+  }
+  assert.equal((await request(path, { session: true, requestOrigin: 'https://evil.example' })).response.status, 403);
+  const revealed = await request(path, { session: true });
+  assert.equal(revealed.response.status, 200);
+  assert.deepEqual(revealed.data, { key: 'STRIPE_API_KEY', value: secret });
+  assert.equal(revealed.response.headers.get('cache-control'), 'no-store');
+  assert.equal(revealed.response.headers.get('access-control-allow-origin'), null);
+  const editPath = '/api/admin/secrets/STRIPE_API_KEY';
+  await request(editPath, { method: 'PUT', session: true, data: { enabled: false } });
+  assert.deepEqual((await request(path, { session: true })).data, revealed.data);
+  assert.equal((await request('/api/v1/keys/STRIPE_API_KEY/value', { auth: agentToken })).response.status, 404);
+  const catalog = await request('/api/admin/secrets', { session: true });
+  assert.ok(!catalog.text.includes(secret));
+  const audit = await request('/api/admin/activity', { session: true });
+  assert.ok(audit.data.activity.some(event => event.action === 'secret.retrieved' && event.actor === 'admin' && event.key === 'STRIPE_API_KEY'));
+  assert.ok(!audit.text.includes(secret));
+  assert.equal((await request('/api/admin/secrets/MISSING/value', { session: true })).response.status, 404);
+  assert.equal((await request(path, { method: 'DELETE', session: true })).response.status, 405);
+  await request(editPath, { method: 'PUT', session: true, data: { enabled: true } });
+});
+
 test('admin can update metadata without reading or replacing the secret', async () => {
   const update = await request('/api/admin/secrets/STRIPE_API_KEY', { method: 'PUT', session: true, data: { description: 'Updated billing credential' } });
   assert.equal(update.response.status, 200);
@@ -169,6 +196,7 @@ test('secret values can be rotated, audit contains metadata only, and deletion r
 test('logout invalidates the session', async () => {
   assert.equal((await request('/api/auth/logout', { method: 'POST', session: true })).response.status, 200);
   assert.equal((await request('/api/auth/session', { session: true })).response.status, 401);
+  assert.equal((await request('/api/admin/secrets/STRIPE_API_KEY/value', { session: true })).response.status, 401);
 });
 
 test('security headers, static allowlist, and JSON content type enforcement', async () => {

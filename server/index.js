@@ -200,13 +200,20 @@ export function createApp(config) {
           gateway.invalidateSecret(data.key);
           return json(201, saved);
         }
-        const match = /^\/api\/admin\/secrets\/([^/]+)$/.exec(pathname);
+        const match = /^\/api\/admin\/secrets\/([^/]+)(\/value)?$/.exec(pathname);
         if (match) {
           let key;
           try { key = decodeURIComponent(match[1]); } catch { fail(400, 'Invalid key encoding.'); }
           if (!keyPattern.test(key)) fail(400, 'Invalid key.');
           const existing = store.get(key);
           if (!existing) fail(404, 'Secret key not found.');
+          if (match[2]) {
+            if (method !== 'GET') fail(405, 'Use GET to reveal a secret.');
+            if (req.headers.origin !== undefined && req.headers.origin !== origin) fail(403, 'Request origin is not allowed.');
+            const value = store.value(key, { includeDisabled: true });
+            store.audit('secret.retrieved', 'admin', key);
+            return json(200, { key, value });
+          }
           if (method === 'PUT') {
             const data = await body(req);
             data.key = key;

@@ -12,7 +12,7 @@ npm start
 
 Open **http://localhost:3000** and sign in with the admin token printed by setup. Setup creates a private, Git-ignored `.env` with a random encryption key and separate admin and agent tokens. It refuses to overwrite an existing configuration. There are no demo secrets or default passwords.
 
-Use the web console to add, edit, rotate, search, and delete secrets. Editing never loads an existing value into the browser; leave the value blank to preserve it. Activity records changes and successful agent access without secret values.
+Use the web console to add, edit, rotate, search, and delete secrets. Values are masked by default: signed-in admins can select **Show** to reveal an individual value, including disabled secrets, then **Hide** to mask it again. There is no reveal timeout. Revealed values are hidden when leaving the Secrets view, when hiding the browser tab, or on logout. Editing never loads an existing value into the form; leave the value blank to preserve it. Activity records changes and successful admin/agent retrievals without secret values.
 
 Use **Disable / Enable** in the secrets list or **Enable this secret** in the editor to temporarily revoke access without deleting the encrypted value. Disabled secrets remain visible to admins, but disappear from REST and MCP agent catalogs and cannot be retrieved, even by exact key. MCP servers referencing a disabled secret lose their connection and tools until it is re-enabled. Previously retrieved values cannot be revoked; rotate credentials at their provider if necessary. Existing secrets remain enabled when upgrading.
 
