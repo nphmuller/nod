@@ -167,7 +167,7 @@ export function createGateway(store, { publicOrigin, protectedValues = [] }) {
     try { resolved = resolveCredentials(server); }
     catch {
       invalidate(server.id);
-      return { status: 'failed', error: 'A referenced credential is missing, unreadable, or unsuitable for an HTTP header.', tools: new Map() };
+      return { status: 'failed', error: 'A referenced credential is missing, disabled, unreadable, or unsuitable for an HTTP header.', tools: new Map() };
     }
     const signature = hash(JSON.stringify({ server, headers: resolved.headers }));
     let entry = entries.get(server.id);

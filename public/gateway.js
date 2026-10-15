@@ -134,7 +134,7 @@ function addCredentialHeader(header = {}, bearer = false) {
   for (const key of available) {
     const option = document.createElement('option');
     option.value = key.key;
-    option.textContent = key.key + (key.missing ? ' (missing)' : '');
+    option.textContent = key.key + (key.missing ? ' (missing)' : key.enabled === false ? ' (disabled)' : '');
     select.append(option);
   }
   select.value = header.secretKey ?? '';

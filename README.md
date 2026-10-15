@@ -14,6 +14,8 @@ Open **http://localhost:3000** and sign in with the admin token printed by setup
 
 Use the web console to add, edit, rotate, search, and delete secrets. Editing never loads an existing value into the browser; leave the value blank to preserve it. Activity records changes and successful agent access without secret values.
 
+Use **Disable / Enable** in the secrets list or **Enable this secret** in the editor to temporarily revoke access without deleting the encrypted value. Disabled secrets remain visible to admins, but disappear from REST and MCP agent catalogs and cannot be retrieved, even by exact key. MCP servers referencing a disabled secret lose their connection and tools until it is re-enabled. Previously retrieved values cannot be revoked; rotate credentials at their provider if necessary. Existing secrets remain enabled when upgrading.
+
 The console and API guide automatically follow your device's light or dark theme, including changes while the page is open.
 
 ```sh

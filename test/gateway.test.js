@@ -216,6 +216,19 @@ test('gateway withholds echoed credentials and masks upstream exception details'
   assert.ok(!activity.text.includes('hello through Nod'));
 });
 
+test('disabling a credential revokes cached upstream tools and re-enabling restores them', async () => {
+  const path = '/api/admin/secrets/UPSTREAM_TOKEN';
+  assert.equal((await admin(path, 'PUT', { enabled: false })).status, 200);
+  const denied = await downstream.callTool({ name: 'home_assistant__echo', arguments: { payload: { message: 'disabled' } } });
+  assert.equal(denied.isError, true);
+  const { tools } = await downstream.listTools();
+  assert.ok(!tools.some(tool => tool.name.startsWith('home_assistant__')));
+  assert.ok(tools.some(tool => tool.name === 'get_secret'));
+  assert.equal((await admin(path, 'PUT', { enabled: true })).status, 200);
+  const restored = await downstream.callTool({ name: 'home_assistant__echo', arguments: { payload: { message: 'restored' } } });
+  assert.equal(restored.structuredContent.message, 'restored');
+});
+
 test('secret rotation reconnects upstreams without restarting Nod or exposing tokens', async () => {
   const before = first.initCount;
   upstreamToken = 'rotated-upstream-private-token-33333333';

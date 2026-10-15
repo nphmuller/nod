@@ -6,6 +6,7 @@ import { join } from 'node:path';
 import { once } from 'node:events';
 import { createApp } from '../server/index.js';
 import { createStore } from '../server/store.js';
+import { DatabaseSync } from 'node:sqlite';
 
 const encryptionKey = randomBytes(32).toString('base64');
 const adminToken = randomBytes(32).toString('base64url');
@@ -102,6 +103,36 @@ test('admin can update metadata without reading or replacing the secret', async 
   assert.equal(value.data.value, secret);
 });
 
+test('disabled secrets remain in the admin catalog but cannot be discovered or retrieved by agents', async () => {
+  const path = '/api/admin/secrets/STRIPE_API_KEY';
+  assert.equal((await request(path, { method: 'PUT', auth: agentToken, data: { enabled: false } })).response.status, 401);
+  assert.equal((await request(path, { method: 'PUT', session: true, requestOrigin: 'https://evil.example', data: { enabled: false } })).response.status, 403);
+  for (const enabled of ['false', 0, null]) {
+    assert.equal((await request(path, { method: 'PUT', session: true, data: { enabled } })).response.status, 400);
+  }
+  const disabled = await request(path, { method: 'PUT', session: true, data: { enabled: false } });
+  assert.equal(disabled.response.status, 200);
+  assert.equal(disabled.data.enabled, false);
+  assert.ok(!disabled.text.includes(secret));
+  assert.equal((await request('/api/admin/secrets', { session: true })).data.keys[0].enabled, false);
+  assert.deepEqual((await request('/api/v1/keys', { auth: agentToken })).data.keys, []);
+  assert.equal((await request('/api/v1/keys/STRIPE_API_KEY/value', { auth: agentToken })).response.status, 404);
+  const edited = await request(path, { method: 'PUT', session: true, data: { description: 'Edited while disabled' } });
+  assert.equal(edited.data.enabled, false);
+  assert.equal((await request(path, { method: 'PUT', session: true, data: { enabled: true } })).data.enabled, true);
+  assert.equal((await request('/api/v1/keys/STRIPE_API_KEY/value', { auth: agentToken })).data.value, secret);
+  const audit = await request('/api/admin/activity', { session: true });
+  for (const action of ['secret.disabled', 'secret.enabled']) assert.ok(audit.data.activity.some(event => event.action === action));
+});
+
+test('secrets can be created disabled', async () => {
+  const created = await request('/api/admin/secrets', { method: 'POST', session: true, data: { key: 'DISABLED', description: 'Initially disabled', value: secret, enabled: false } });
+  assert.equal(created.response.status, 201);
+  assert.equal(created.data.enabled, false);
+  assert.equal((await request('/api/v1/keys/DISABLED/value', { auth: agentToken })).response.status, 404);
+  await request('/api/admin/secrets/DISABLED', { method: 'DELETE', session: true });
+});
+
 test('mutation validation, duplicate protection, CSRF protection, and read-only agent boundary', async () => {
   assert.equal((await request('/api/admin/secrets', { method: 'POST', session: true, data: { key: 'STRIPE_API_KEY', description: 'Duplicate', value: 'other' } })).response.status, 409);
   for (const data of [
@@ -188,4 +219,27 @@ test('encrypted data persists across restarts and authenticates against the encr
 test('unsafe configuration fails closed', () => {
   assert.throws(() => createApp({ encryptionKey: 'bad', adminToken, agentToken, origin, dataDir: directory }), /Configure/);
   assert.throws(() => createApp({ encryptionKey, adminToken, agentToken: adminToken, origin, dataDir: directory }), /Configure/);
+});
+
+test('legacy vaults migrate enabled by default and persist disabled state across restarts', async () => {
+  const folder = join(directory, 'legacy');
+  await mkdir(folder);
+  const db = new DatabaseSync(join(folder, 'vault.sqlite'));
+  db.exec('CREATE TABLE secrets (key TEXT PRIMARY KEY, description TEXT NOT NULL, encrypted_value TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL)');
+  db.prepare('INSERT INTO secrets VALUES (?, ?, ?, ?, ?)').run('LEGACY', 'Legacy credential', 'placeholder', '2026-01-01', '2026-01-01');
+  db.close();
+  const key = Buffer.from(encryptionKey, 'base64');
+  let store = createStore(folder, key);
+  assert.equal(store.get('LEGACY').enabled, true);
+  store.save('LEGACY', 'Legacy credential', secret);
+  assert.equal(store.value('LEGACY'), secret);
+  store.save('LEGACY', 'Legacy credential', undefined, 'admin', false);
+  store.close();
+  store = createStore(folder, key);
+  assert.equal(store.get('LEGACY').enabled, false);
+  assert.equal(store.value('LEGACY'), undefined);
+  assert.deepEqual(store.list(), []);
+  store.save('LEGACY', 'Legacy credential', undefined, 'admin', true);
+  assert.equal(store.value('LEGACY'), secret);
+  store.close();
 });

@@ -138,6 +138,25 @@ test('MCP retrieves only the requested secret, with no-cache responses and metad
   assert.ok(!JSON.stringify(audit).includes(value));
 });
 
+test('MCP hides disabled secrets and restores access when re-enabled', async () => {
+  async function setEnabled(enabled) {
+    const response = await fetch(`${base}/api/admin/secrets/BILLING_KEY`, {
+      method: 'PUT', headers: { Origin: origin, Cookie: adminCookie, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ enabled }),
+    });
+    assert.equal(response.status, 200);
+  }
+  await setEnabled(false);
+  const catalog = await client.callTool({ name: 'list_keys', arguments: {} });
+  assert.deepEqual(catalog.structuredContent.keys, []);
+  const denied = await client.callTool({ name: 'get_secret', arguments: { key: 'BILLING_KEY' } });
+  assert.equal(denied.isError, true);
+  assert.ok(!JSON.stringify(denied).includes(value));
+  await setEnabled(true);
+  const restored = await client.callTool({ name: 'get_secret', arguments: { key: 'BILLING_KEY' } });
+  assert.deepEqual(restored.structuredContent, { key: 'BILLING_KEY', value });
+});
+
 test('MCP missing or invalid keys return errors without secret values', async () => {
   for (const key of ['MISSING', '../BILLING_KEY', '', 'x'.repeat(129)]) {
     const result = await client.callTool({ name: 'get_secret', arguments: { key } });

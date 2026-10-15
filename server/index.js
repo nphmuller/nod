@@ -69,6 +69,7 @@ export function createApp(config) {
     } catch { fail(400, 'Invalid JSON body.'); }
   }
   function validate(data, isNew) {
+    if (data.enabled !== undefined && typeof data.enabled !== 'boolean') fail(400, 'Enabled must be a boolean.');
     if (typeof data.key !== 'string' || !keyPattern.test(data.key)) fail(400, 'Keys must be 1–128 characters: letters, numbers, dots, underscores, or hyphens; start with a letter or number.');
     if (typeof data.description !== 'string' || !data.description.trim() || data.description.length > 2000) fail(400, 'Add a description of 1–2000 characters.');
     if (isNew || data.value !== undefined) {
@@ -161,7 +162,7 @@ export function createApp(config) {
           res.setHeader('Set-Cookie', cookie('', 0));
           return json(200, { ok: true });
         }
-        if (method === 'GET' && pathname === '/api/admin/secrets') return json(200, { keys: store.list() });
+        if (method === 'GET' && pathname === '/api/admin/secrets') return json(200, { keys: store.list({ includeDisabled: true }) });
         if (method === 'GET' && pathname === '/api/admin/activity') return json(200, { activity: store.activity() });
         if (pathname === '/api/admin/mcp-servers') {
           if (method === 'GET') return json(200, { servers: await gateway.statuses() });
@@ -195,7 +196,7 @@ export function createApp(config) {
           const data = await body(req);
           validate(data, true);
           if (store.get(data.key)) fail(409, 'This key already exists. Choose another key or edit it.');
-          const saved = store.save(data.key, data.description.trim(), data.value);
+          const saved = store.save(data.key, data.description.trim(), data.value, 'admin', data.enabled);
           gateway.invalidateSecret(data.key);
           return json(201, saved);
         }
@@ -204,13 +205,15 @@ export function createApp(config) {
           let key;
           try { key = decodeURIComponent(match[1]); } catch { fail(400, 'Invalid key encoding.'); }
           if (!keyPattern.test(key)) fail(400, 'Invalid key.');
-          if (!store.get(key)) fail(404, 'Secret key not found.');
+          const existing = store.get(key);
+          if (!existing) fail(404, 'Secret key not found.');
           if (method === 'PUT') {
             const data = await body(req);
             data.key = key;
+            if (data.description === undefined) data.description = existing.description;
             validate(data, false);
-            const saved = store.save(key, data.description.trim(), data.value);
-            if (data.value !== undefined) gateway.invalidateSecret(key);
+            const saved = store.save(key, data.description.trim(), data.value, 'admin', data.enabled);
+            if (data.value !== undefined || saved.enabled !== existing.enabled) gateway.invalidateSecret(key);
             return json(200, saved);
           }
           if (method === 'DELETE') { store.delete(key); gateway.invalidateSecret(key); return json(200, { ok: true }); }

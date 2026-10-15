@@ -33,6 +33,10 @@ export function createStore(directory, encryptionKey) {
       updated_at TEXT NOT NULL
     );
   `);
+  // Existing vaults predate per-secret availability. Keep those secrets enabled.
+  if (!db.prepare('PRAGMA table_info(secrets)').all().some(column => column.name === 'enabled')) {
+    db.exec('ALTER TABLE secrets ADD COLUMN enabled INTEGER NOT NULL DEFAULT 1 CHECK (enabled IN (0, 1))');
+  }
 
   function encrypt(key, value) {
     const iv = randomBytes(12);
@@ -50,7 +54,7 @@ export function createStore(directory, encryptionKey) {
     return Buffer.concat([decipher.update(ciphertext), decipher.final()]).toString('utf8');
   }
 
-  const metadata = row => row && ({ key: row.key, description: row.description, createdAt: row.created_at, updatedAt: row.updated_at });
+  const metadata = row => row && ({ key: row.key, description: row.description, enabled: Boolean(row.enabled), createdAt: row.created_at, updatedAt: row.updated_at });
   const find = db.prepare('SELECT * FROM secrets WHERE key = ?');
   const recordAudit = db.prepare('INSERT INTO audit (action, actor, key, timestamp) VALUES (?, ?, ?, ?)');
   function audit(action, actor, key = null) {
@@ -69,25 +73,29 @@ export function createStore(directory, encryptionKey) {
   }
 
   return {
-    list() {
-      return db.prepare('SELECT key, description, created_at, updated_at FROM secrets ORDER BY key COLLATE NOCASE').all().map(metadata);
+    list({ includeDisabled = false } = {}) {
+      const rows = db.prepare(`SELECT key, description, enabled, created_at, updated_at FROM secrets ${includeDisabled ? '' : 'WHERE enabled = 1'} ORDER BY key COLLATE NOCASE`).all().map(metadata);
+      // Keep the agent catalog's existing schema; availability is admin metadata.
+      return includeDisabled ? rows : rows.map(({ enabled, ...item }) => item);
     },
     get(key) { return metadata(find.get(key)); },
     value(key) {
       const row = find.get(key);
-      return row ? decrypt(key, row.encrypted_value) : undefined;
+      return row?.enabled ? decrypt(key, row.encrypted_value) : undefined;
     },
-    save(key, description, value, actor = 'admin') {
+    save(key, description, value, actor = 'admin', enabled) {
       return transaction(() => {
         const existing = find.get(key);
         const now = new Date().toISOString();
         const encrypted = value === undefined ? existing?.encrypted_value : encrypt(key, value);
         if (!encrypted) throw new Error('A new secret requires a value.');
-        db.prepare(`INSERT INTO secrets VALUES (?, ?, ?, ?, ?)
+        const available = enabled === undefined ? existing?.enabled ?? 1 : Number(enabled);
+        db.prepare(`INSERT INTO secrets (key, description, encrypted_value, created_at, updated_at, enabled) VALUES (?, ?, ?, ?, ?, ?)
           ON CONFLICT(key) DO UPDATE SET description = excluded.description,
-          encrypted_value = excluded.encrypted_value, updated_at = excluded.updated_at`)
-          .run(key, description, encrypted, existing?.created_at ?? now, now);
+          encrypted_value = excluded.encrypted_value, updated_at = excluded.updated_at, enabled = excluded.enabled`)
+          .run(key, description, encrypted, existing?.created_at ?? now, now, available);
         audit(existing ? 'secret.updated' : 'secret.created', actor, key);
+        if (existing && existing.enabled !== available) audit(available ? 'secret.enabled' : 'secret.disabled', actor, key);
         return metadata(find.get(key));
       });
     },

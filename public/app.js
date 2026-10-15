@@ -5,6 +5,11 @@ let deleteKey = null;
 let currentView = 'secrets';
 let toastTimer;
 
+const secretAvailability = document.createElement('div');
+secretAvailability.className = 'gateway-options';
+secretAvailability.innerHTML = '<label class="gateway-check"><input id="secret-enabled" type="checkbox" checked> Enable this secret</label><p class="field-note">Disabled secrets stay encrypted, but are hidden from agents and cannot be used by MCP servers.</p>';
+$('#secret-error').before(secretAvailability);
+
 async function api(path, options = {}) {
   const response = await fetch(path, {
     credentials: 'same-origin',
@@ -71,6 +76,26 @@ function renderKeys() {
     row.querySelector('.key-name').textContent = item.key;
     row.querySelector('.key-name').addEventListener('click', () => openSecret(item));
     row.querySelector('.key-description').textContent = item.description;
+    if (!item.enabled) {
+      const status = document.createElement('span');
+      status.className = 'gateway-status';
+      status.textContent = 'Disabled';
+      row.querySelector('.key-info').append(status);
+    }
+    const toggle = document.createElement('button');
+    toggle.className = 'edit-action';
+    toggle.textContent = item.enabled ? 'Disable' : 'Enable';
+    toggle.setAttribute('aria-label', `${toggle.textContent} ${item.key}`);
+    toggle.addEventListener('click', async () => {
+      toggle.disabled = true;
+      try {
+        await api(`/api/admin/secrets/${encodeURIComponent(item.key)}`, { method: 'PUT', body: JSON.stringify({ enabled: !item.enabled }) });
+        notify(item.enabled ? 'Secret disabled.' : 'Secret enabled.');
+        await loadKeys();
+      } catch (error) { notify(error.message); }
+      finally { toggle.disabled = false; }
+    });
+    row.querySelector('.delete-action').before(toggle);
     row.querySelector('.date-cell').textContent = dateLabel(item.updatedAt);
     row.querySelector('.date-cell').title = new Date(item.updatedAt).toLocaleString();
     row.querySelector('.edit-action').addEventListener('click', () => openSecret(item));
@@ -103,6 +128,7 @@ async function loadActivity() {
   const data = await api('/api/admin/activity');
   const labels = {
     'secret.created': 'Secret created', 'secret.updated': 'Secret updated', 'secret.deleted': 'Secret deleted',
+    'secret.enabled': 'Secret enabled', 'secret.disabled': 'Secret disabled',
     'secret.retrieved': 'Secret retrieved', 'catalog.listed': 'Key catalog requested', 'session.started': 'Signed in to the vault',
     'upstream.created': 'MCP server added', 'upstream.updated': 'MCP server updated', 'upstream.deleted': 'MCP server removed',
     'upstream.reconnected': 'MCP server reconnected', 'gateway.tool_called': 'Upstream tool called',
@@ -135,6 +161,7 @@ function openSecret(item = null) {
   $('#secret-key').value = item?.key ?? '';
   $('#secret-key').readOnly = Boolean(item);
   $('#secret-description').value = item?.description ?? '';
+  $('#secret-enabled').checked = item?.enabled ?? true;
   $('#secret-value').type = 'password';
   $('#secret-value').required = !item;
   $('#secret-value').placeholder = item ? 'Leave blank to keep the current value' : 'Paste your secret value';
@@ -186,7 +213,7 @@ $('#secret-form').addEventListener('submit', async event => {
   const button = $('#save-secret');
   button.disabled = true;
   $('#secret-error').textContent = '';
-  const data = { key: $('#secret-key').value, description: $('#secret-description').value };
+  const data = { key: $('#secret-key').value, description: $('#secret-description').value, enabled: $('#secret-enabled').checked };
   if (!editKey || $('#secret-value').value !== '') data.value = $('#secret-value').value;
   try {
     await api(editKey ? `/api/admin/secrets/${encodeURIComponent(editKey)}` : '/api/admin/secrets', { method: editKey ? 'PUT' : 'POST', body: JSON.stringify(data) });
